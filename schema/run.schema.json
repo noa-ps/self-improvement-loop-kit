@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local/self-improvement-loop-kit/run.schema.json",
+  "title": "Scoreboard run record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ts",
+    "loop_id",
+    "probe",
+    "pass",
+    "seconds_to_green",
+    "actions",
+    "learned_hash",
+    "learned_count"
+  ],
+  "properties": {
+    "ts": { "type": "string", "minLength": 1 },
+    "loop_id": { "type": "string", "minLength": 1 },
+    "probe": { "type": "string", "minLength": 1 },
+    "pass": { "type": "boolean" },
+    "seconds_to_green": { "type": "number", "minimum": 0 },
+    "actions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "learned_hash": { "type": "string", "minLength": 1 },
+    "learned_count": { "type": "integer", "minimum": 0 }
+  }
+}

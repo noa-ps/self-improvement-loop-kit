@@ -1,0 +1,6 @@
+{"ts":"2026-09-16T10:00:00Z","loop_id":"checkout-5xx","probe":"true","pass":true,"seconds_to_green":20,"actions":["rollback"],"learned_hash":"aaaa0000","learned_count":0}
+{"ts":"2026-09-16T10:10:00Z","loop_id":"checkout-5xx","probe":"true","pass":true,"seconds_to_green":22,"actions":["rollback"],"learned_hash":"aaaa0000","learned_count":0}
+{"ts":"2026-09-16T10:20:00Z","loop_id":"checkout-5xx","probe":"true","pass":true,"seconds_to_green":18,"actions":["rollback"],"learned_hash":"aaaa0000","learned_count":0}
+{"ts":"2026-09-16T11:00:00Z","loop_id":"checkout-5xx","probe":"true","pass":false,"seconds_to_green":90,"actions":["restart"],"learned_hash":"cccc2222","learned_count":1}
+{"ts":"2026-09-16T11:10:00Z","loop_id":"checkout-5xx","probe":"true","pass":false,"seconds_to_green":95,"actions":["restart"],"learned_hash":"cccc2222","learned_count":1}
+{"ts":"2026-09-16T11:20:00Z","loop_id":"checkout-5xx","probe":"true","pass":true,"seconds_to_green":80,"actions":["restart"],"learned_hash":"cccc2222","learned_count":1}

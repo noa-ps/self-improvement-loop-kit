@@ -1,0 +1,17 @@
+trigger: 5xx on checkout
+actor: claude-code
+playbook_path: fixtures/naive/playbook.md
+allow:
+  - restart
+deny:
+  - nothing
+on_fail: stop
+budget:
+  max_iterations: 99
+  blast: whole cluster
+promotion:
+  method: during-loop
+  target_path: fixtures/naive/playbook.md
+learned_section: notes
+probe:
+  command: agent says so

@@ -1,0 +1,34 @@
+# macOS
+.DS_Store
+
+# Environment files
+.env
+.env.*
+
+# Keys and certificates
+*.pem
+
+# Claude config
+.claude/settings.local.json
+
+# Cursor IDE state
+.cursor/hooks/state/
+.cursor/rules/
+
+# Loop Kit project
+loop-kit/.intake.json
+loop-kit/*.log
+
+# Python
+__pycache__/
+*.pyc
+
+# Node.js
+node_modules/
+
+# Project planning
+PLAN.md
+planning/
+tmp/
+demo-ui/
+scripts/demo-ui-server

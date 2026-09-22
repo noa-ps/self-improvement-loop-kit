@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Self Improvement Loop Kit</title>
+  <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32" />
+  <link rel="icon" href="/favicon-16.png" type="image/png" sizes="16x16" />
+  <link rel="icon" href="/favicon.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/tokens.css" />
+  <style>
+    html, body { height: 100%; }
+    body { overflow: hidden; }
+    .silk-shell {
+      display: grid;
+      grid-template-columns: 248px 1fr;
+      height: 100vh;
+    }
+    @media (max-width: 800px) {
+      .silk-shell { grid-template-columns: 1fr; grid-template-rows: 42vh 1fr; }
+      .silk-side { border-right: 0; border-bottom: 1px solid #161616; }
+    }
+    .silk-side {
+      background: var(--side);
+      border-right: 1px solid var(--side-line);
+      padding: 16px 14px 20px;
+      overflow: auto;
+    }
+    .silk-lede {
+      margin: 0 0 14px;
+      font-size: 13px;
+      line-height: 1.45;
+      color: var(--quiet);
+    }
+    .silk-lede b { color: var(--teal); font-weight: 500; font-size: 13px; }
+    .silk-lede small { font-size: 10px; }
+    .silk-lede span { display: block; margin-top: 6px; font-size: 11px; color: var(--quiet); }
+    .silk-find { display: block; margin: 0 0 16px; }
+    .silk-find input {
+      appearance: none;
+      width: 100%;
+      padding: 8px 10px;
+      background: var(--field);
+      border: 1px solid var(--field-line);
+      border-radius: 0;
+      color: var(--field-ink);
+      font: inherit;
+      font-size: 12px;
+    }
+    .silk-find input::placeholder { color: #3d4a58; }
+    .silk-find input:focus {
+      outline: none;
+      border-color: var(--ring);
+      box-shadow: 0 0 0 1px var(--glow);
+    }
+    .silk-label {
+      font-size: 10px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: #4a4a4a;
+      margin: 0 0 8px;
+    }
+    .silk-tones { display: flex; flex-direction: column; gap: 2px; margin-bottom: 22px; }
+    .silk-tones button {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 5px 6px;
+      border-radius: 4px;
+      text-align: left;
+      color: #8a8a8a;
+      font-size: 12px;
+    }
+    .silk-tones button:hover, .silk-tones button.is-on { color: #e8f6ff; background: #0b1018; }
+    .silk-pip {
+      width: 6px; height: 6px; border-radius: 50%; flex: none;
+      box-shadow: 0 0 8px currentColor;
+    }
+    .silk-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 18px; }
+    .silk-chips button {
+      padding: 3px 8px;
+      border: 1px solid var(--field-line);
+      color: #6a7a82;
+      font-size: 11px;
+    }
+    .silk-chips button:hover,
+    .silk-chips button.is-on {
+      color: var(--teal);
+      border-color: var(--chip-line);
+      background: var(--chip-fill);
+    }
+    .silk-list { font-size: 12px; line-height: 1.55; color: #8a8a8a; }
+    .silk-list button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 6px 4px 6px 0;
+      color: inherit;
+    }
+    .silk-list button:hover, .silk-list button.is-on { color: #e8f6ff; }
+    .silk-list .silk-branch {
+      color: #c8d4e0;
+      padding: 8px 0 4px;
+      font-size: 12px;
+    }
+    .silk-list .silk-branch span { display: block; color: #4a4a4a; font-size: 10px; margin-top: 2px; }
+    .silk-list .silk-run-meta { display: block; color: #4a4a4a; font-size: 10px; }
+    .silk-callout { margin-top: 18px; }
+    .silk-verdict {
+      color: var(--teal);
+      font-size: 12px;
+      letter-spacing: 0.04em;
+    }
+    .silk-verdict-why { margin-top: 6px; color: var(--quiet); line-height: 1.45; }
+    .silk-exam { margin-top: 12px; color: var(--quiet); word-break: break-word; line-height: 1.45; }
+    .silk-stage { position: relative; min-width: 0; min-height: 0; background: var(--board); }
+    canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+    canvas.is-hold { cursor: grabbing; }
+    .silk-vacant {
+      position: absolute; inset: 0;
+      display: none; align-items: center; justify-content: center;
+      flex-direction: column; gap: 10px;
+      color: var(--quiet); text-align: center; padding: 24px;
+    }
+    .silk-vacant.is-on { display: flex; }
+    .silk-vacant-run {
+      margin: 0;
+      font-size: 11px;
+      color: var(--quiet);
+    }
+    .silk-vacant-run code {
+      font: inherit;
+      color: var(--quiet);
+    }
+    .silk-lens {
+      position: absolute;
+      left: 16px;
+      bottom: 16px;
+      width: 168px;
+      height: 168px;
+      border-radius: 50%;
+      overflow: hidden;
+      pointer-events: none;
+      background: var(--board);
+      box-shadow:
+        inset 0 -26px 30px rgba(0, 0, 0, 0.4),
+        inset 0 0 0 2px rgba(160, 255, 240, 0.28),
+        0 0 0 1px rgba(150, 255, 235, 0.2),
+        0 16px 40px rgba(0, 0, 0, 0.45),
+        0 0 36px rgba(70, 255, 220, 0.1);
+    }
+    .silk-lens canvas { display: block; width: 100%; height: 100%; }
+    .silk-lens::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at 50% 50%, transparent 52%, rgba(4, 8, 12, 0.35) 78%, rgba(4, 8, 12, 0.62) 100%),
+        radial-gradient(circle at 32% 26%, rgba(230, 255, 250, 0.2), transparent 38%);
+    }
+    .silk-note {
+      position: absolute; right: 16px; top: 16px; max-width: 280px;
+      color: var(--ink); font-size: 11px; line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <div class="silk-shell">
+    <aside class="silk-side">
+      <p class="silk-lede"><b>SILK</b> | <small>Self Improvement Loop Kit</small><span>Play, record the probe, keep a pass, drop it if later runs worsen.</span></p>
+      <label class="silk-find">
+        <input id="q" type="search" placeholder="Search" autocomplete="off" spellcheck="false" />
+      </label>
+      <p class="silk-label">Filters</p>
+      <div class="silk-tones" id="tones"></div>
+      <p class="silk-label">Actions</p>
+      <div class="silk-chips" id="chips"></div>
+      <p class="silk-label">Runs</p>
+      <div class="silk-list" id="list"></div>
+      <div class="silk-callout">
+        <p class="silk-label">Trend</p>
+        <p class="silk-verdict" id="verdict"></p>
+        <p class="silk-verdict-why" id="why"></p>
+        <p class="silk-exam" id="exam"></p>
+      </div>
+    </aside>
+    <div class="silk-stage">
+      <canvas id="board"></canvas>
+      <div class="silk-lens" aria-hidden="true"><canvas id="lens"></canvas></div>
+      <div class="silk-vacant" id="vacant">
+        <p>No runs yet.</p>
+        <p class="silk-vacant-run">First time: interview in the project — <code>silk build</code> or <code>/self-improvement-loop-kit</code> — so you have a <code>playbook.md</code>.</p>
+        <p class="silk-vacant-run">Then follow that playbook. This board stays empty until <code>silk play --repo .</code> records a run.</p>
+      </div>
+      <div class="silk-note" id="note"></div>
+    </div>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

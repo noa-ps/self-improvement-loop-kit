@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Lint a loop spec. Prints CODE: message. Exit 1 if any codes."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from kitlib import kit_root, lint_spec, load_spec  # noqa: E402
+
+MESSAGES = {
+    "NO_PROBE": "NO_PROBE: no independent probe.command — next /loop cannot prove it worked",
+    "SELF_GRADE": "SELF_GRADE: probe is 'agent says so' — remediator is grading itself",
+    "IN_SESSION_LEARN": "IN_SESSION_LEARN: lesson written during remediation or into memory",
+    "NO_WRITEBACK": "NO_WRITEBACK: next /loop cannot get smarter — missing Learned target or promote.md",
+    "NO_SCOREBOARD": "NO_SCOREBOARD: no scoreboard.path — improvement cannot be measured",
+    "PROBE_EDITABLE": "PROBE_EDITABLE: playbook, probe, or scoreboard is not sealed in deny",
+}
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("spec")
+    p.add_argument("--playbook", default="")
+    p.add_argument("--promote", default="")
+    args = p.parse_args()
+    spec_path = Path(args.spec)
+    spec = load_spec(spec_path)
+    playbook = ""
+    pb = Path(args.playbook) if args.playbook else Path(spec.get("playbook_path") or "")
+    if pb and pb.exists():
+        playbook = pb.read_text(encoding="utf-8")
+    promote = Path(args.promote) if args.promote else spec_path.parent / "promote.md"
+    promote_exists = promote.exists() or (kit_root() / "templates" / "promote.md").exists()
+    codes = lint_spec(spec, playbook_text=playbook, promote_exists=promote_exists)
+    if not codes:
+        print("OK")
+        return 0
+    for c in codes:
+        print(MESSAGES.get(c, f"{c}: invalid loop contract"))
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

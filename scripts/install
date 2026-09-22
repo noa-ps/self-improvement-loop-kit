@@ -1,0 +1,25 @@
+#!/bin/sh
+# First install: silk on PATH + the interview skill on Claude Code, Codex, and Cursor.
+set -e
+root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+bin="${HOME}/.local/bin"
+mkdir -p "$bin"
+ln -sfn "$root/scripts/silk" "$bin/silk"
+rm -f "$bin/sil"
+echo "silk  $bin/silk -> $root/scripts/silk"
+
+mkdir -p "${HOME}/.claude/skills" "${HOME}/.agents/skills" "${HOME}/.cursor/skills" "${HOME}/.cursor/commands"
+ln -sfn "$root/self-improvement-loop-kit" "${HOME}/.claude/skills/self-improvement-loop-kit"
+ln -sfn "$root/.agents/skills/self-improvement-loop-kit" "${HOME}/.agents/skills/self-improvement-loop-kit"
+ln -sfn "$root/.cursor/skills/self-improvement-loop-kit" "${HOME}/.cursor/skills/self-improvement-loop-kit"
+ln -sfn "$root/.cursor/commands/self-improvement-loop-kit.md" "${HOME}/.cursor/commands/self-improvement-loop-kit.md"
+echo "claude  ${HOME}/.claude/skills/self-improvement-loop-kit"
+echo "codex   ${HOME}/.agents/skills/self-improvement-loop-kit"
+echo "cursor  ${HOME}/.cursor/skills/self-improvement-loop-kit"
+echo "cursor  ${HOME}/.cursor/commands/self-improvement-loop-kit.md"
+
+case ":$PATH:" in
+  *":$bin:"*) ;;
+  *) echo "add to PATH: export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
+esac
+echo "next: silk build   or   /self-improvement-loop-kit"

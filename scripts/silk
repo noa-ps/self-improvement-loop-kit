@@ -1,0 +1,683 @@
+#!/usr/bin/env python3
+"""silk — Self Improvement Loop Kit. Same on Cursor, Claude Code, and Codex."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import random
+import select
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+from http.client import HTTPConnection
+from pathlib import Path
+
+try:
+    import termios
+    import tty
+except ImportError:
+    termios = None  # type: ignore[misc, assignment]
+    tty = None  # type: ignore[misc, assignment]
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from kitlib import (  # noqa: E402
+    dump_yaml,
+    kit_root,
+    lint_spec,
+    playbook_from_intake,
+    spec_from_intake,
+)
+
+# Visualizer tokens as terminal color. No TUI library — silk stays one file on PATH.
+_C = {
+    "text": (200, 212, 224),
+    "muted": (106, 106, 106),
+    "accent": (126, 246, 228),
+    "pass": (108, 255, 200),
+    "fail": (255, 94, 200),
+    "edge": (58, 110, 108),
+}
+
+
+def _use_color() -> bool:
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("TERM") == "dumb":
+        return False
+    return sys.stdout.isatty()
+
+
+def _paint(name: str, s: str, bold: bool = False) -> str:
+    if not _use_color():
+        return s
+    r, g, b = _C[name]
+    pre = "\033[1m" if bold else ""
+    return f"{pre}\033[38;2;{r};{g};{b}m{s}\033[0m"
+
+
+def _cluster_points() -> tuple[list[tuple[float, float]], list[int]]:
+    rng = random.Random(7)
+    blobs = (
+        (0.00, 0.00, 0.18, 80),
+        (0.00, 0.00, 0.48, 110),
+        (0.92, -0.12, 0.26, 48),
+        (-0.82, 0.42, 0.22, 40),
+        (0.38, 0.68, 0.20, 36),
+        (-0.28, -0.62, 0.24, 34),
+    )
+    pts: list[tuple[float, float]] = []
+    core_n = 0
+    for i, (ox, oy, sig, n) in enumerate(blobs):
+        for _ in range(n):
+            pts.append((rng.gauss(ox, sig), rng.gauss(oy, sig)))
+        if i == 0:
+            core_n = len(pts)
+    return pts, core_n
+
+
+def _knn_edges(pts: list[tuple[float, float]], k: int = 4) -> list[tuple[int, int]]:
+    edges: set[tuple[int, int]] = set()
+    for i, (x, y) in enumerate(pts):
+        near = sorted(
+            ((j, (x - u) ** 2 + (y - v) ** 2) for j, (u, v) in enumerate(pts) if j != i),
+            key=lambda t: t[1],
+        )[:k]
+        for j, _ in near:
+            edges.add((i, j) if i < j else (j, i))
+    return list(edges)
+
+
+def _plot_segment(cells, kind, c0, r0, c1, r1) -> None:
+    steps = max(abs(c1 - c0), abs(r1 - r0), 1)
+    for s in range(1, steps):
+        c = int(round(c0 + (c1 - c0) * s / steps))
+        r = int(round(r0 + (r1 - r0) * s / steps))
+        if 0 <= r < len(cells) and 0 <= c < len(cells[0]) and cells[r][c] == " ":
+            cells[r][c] = "·"
+            kind[r][c] = "e"
+
+
+def welcome() -> None:
+    cols, rows = 78, 24
+    pts, core_n = _cluster_points()
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    minx, maxx = min(xs), max(xs)
+    miny, maxy = min(ys), max(ys)
+    pad_r, pad_l = 1, 2
+    label_w = 0
+    span_x = max(maxx - minx, 1e-6)
+    span_y = max(maxy - miny, 1e-6)
+
+    def to_cell(x: float, y: float) -> tuple[int, int]:
+        c = pad_l + int((x - minx) / span_x * (cols - pad_l - pad_r - label_w - 1))
+        r = pad_r + int((y - miny) / span_y * (rows - pad_r * 2 - 1))
+        return c, r
+
+    cells = [[" "] * cols for _ in range(rows)]
+    kind = [[" "] * cols for _ in range(rows)]
+    loc = [to_cell(x, y) for x, y in pts]
+    for i, j in _knn_edges(pts, k=4):
+        _plot_segment(cells, kind, *loc[i], *loc[j])
+    for i, (c, r) in enumerate(loc):
+        if not (0 <= r < rows and 0 <= c < cols):
+            continue
+        if i % 4 == 0:
+            cells[r][c] = "●"
+            kind[r][c] = "p" if i % 3 else "f"
+        else:
+            cells[r][c] = "○"
+            kind[r][c] = "a" if i % 5 else "m"
+    tone = {"e": "edge", "p": "pass", "f": "fail", "a": "accent", "m": "muted", "s": "accent"}
+    out = [""]
+    for r in range(rows):
+        parts = []
+        for c in range(cols):
+            ch = cells[r][c]
+            k = kind[r][c]
+            parts.append(_paint(tone[k], ch, bold=(k == "s")) if k in tone else ch)
+        out.append("  " + "".join(parts).rstrip())
+    out.append("")
+    out.append(
+        "  "
+        + _paint("accent", "SILK", bold=True)
+        + _paint("muted", " | ")
+        + _paint("text", "Self Improvement Loop Kit")
+    )
+    out.append("")
+    print("\n".join(out))
+
+
+PROMPTS = [
+    ("trigger", "What should start this loop?", None),
+    ("steps", "What should the agent do, step by step?", None),
+    ("must_not", "What must it not do?", None),
+    ("actor", "Who runs it? (cursor / claude-code / codex)", {"cursor", "claude-code", "codex"}),
+    ("allow", "Allowed verbs? (comma-separated)", None),
+    ("probe", "Shell command that means healthy?", None),
+    ("on_fail", "If that command fails? (revert / stop / page)", {"revert", "stop", "page"}),
+    ("max_iterations", "Max tries? (number)", None),
+    ("blast", "Blast radius?", None),
+]
+
+UP = "up"
+DOWN = "down"
+ENTER = "enter"
+EMIT = 9
+_PASTE_ON = "\x1b[?2004h"
+_PASTE_OFF = "\x1b[?2004l"
+
+
+def _tty() -> bool:
+    return bool(termios) and sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _pending() -> bool:
+    r, _, _ = select.select([sys.stdin], [], [], 0)
+    return bool(r)
+
+
+def _read_csi() -> str:
+    ch = sys.stdin.read(1)
+    if ch != "[":
+        return "esc"
+    seq = ""
+    while True:
+        c = sys.stdin.read(1)
+        if not c:
+            return "esc"
+        seq += c
+        if ("A" <= c <= "Z") or ("a" <= c <= "z") or c == "~":
+            break
+    if seq == "A":
+        return UP
+    if seq == "B":
+        return DOWN
+    if seq == "200~":
+        return "paste_start"
+    if seq == "201~":
+        return "paste_end"
+    return "esc"
+
+
+def _read_key_raw() -> str:
+    ch = sys.stdin.read(1)
+    if ch == "\x03":
+        raise KeyboardInterrupt
+    if ch in {"\r", "\n"}:
+        return ENTER
+    if ch in {"\x7f", "\x08"}:
+        return "backspace"
+    if ch == "\x1b":
+        return _read_csi()
+    if ch.isprintable():
+        return ch
+    return "esc"
+
+
+def _show_buf(buf: str) -> str:
+    return buf.replace("\r", "").replace("\n", " · ")
+
+
+def _read_line(initial: str) -> tuple[str, str]:
+    if not _tty():
+        raw = input().strip()
+        return raw, ENTER
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    buf = initial
+    pasting = False
+    prompt = _paint("accent", "▸ ")
+    sys.stdout.write(_PASTE_ON)
+    sys.stdout.flush()
+    try:
+        tty.setraw(fd)
+        while True:
+            sys.stdout.write("\r\033[K" + prompt + _show_buf(buf))
+            sys.stdout.flush()
+            key = _read_key_raw()
+            if key == "paste_start":
+                pasting = True
+                continue
+            if key == "paste_end":
+                pasting = False
+                continue
+            if pasting:
+                if key == ENTER:
+                    buf += "\n"
+                elif key == "backspace":
+                    buf = buf[:-1]
+                elif len(key) == 1:
+                    buf += key
+                continue
+            if key == ENTER:
+                if _pending():
+                    buf += "\n"
+                    continue
+                sys.stdout.write("\n")
+                return buf.strip(), ENTER
+            if key == UP:
+                sys.stdout.write("\n")
+                return buf.strip(), UP
+            if key == DOWN:
+                sys.stdout.write("\n")
+                return buf.strip(), DOWN
+            if key == "backspace":
+                buf = buf[:-1]
+                continue
+            if len(key) == 1:
+                buf += key
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        sys.stdout.write(_PASTE_OFF)
+        sys.stdout.flush()
+
+
+def _read_key() -> str:
+    if not _tty():
+        raw = input()
+        if raw.strip() == "":
+            return ENTER
+        return raw
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        return _read_key_raw()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+def _ok(prompt: str, allowed: set[str] | None, raw: str) -> str | None:
+    if not raw:
+        return None
+    if allowed and raw not in allowed:
+        print(_paint("fail", "  choose: " + " / ".join(sorted(allowed))))
+        return None
+    if prompt.startswith("Max tries"):
+        if not raw.isdigit() or int(raw) < 1:
+            print(_paint("fail", "  need a positive integer"))
+            return None
+    return raw
+
+
+def ask(
+    prompt: str,
+    allowed: set[str] | None,
+    index: int,
+    total: int,
+    existing: str | None = None,
+) -> tuple[str, str]:
+    step = f"{index:02d} / {total:02d}"
+    buf = existing or ""
+    while True:
+        print(_paint("muted", f"┌  {step}"))
+        print(_paint("text", f"│  {prompt}"))
+        if allowed:
+            print(_paint("muted", "│  " + " · ".join(sorted(allowed))))
+        if existing:
+            print(_paint("muted", f"│  now: {existing}"))
+        print(_paint("muted", "└"))
+        print(_paint("muted", "  ↑ ↓"))
+        text, act = _read_line(buf)
+        buf = text
+        if act in {UP, DOWN}:
+            if not text:
+                if existing:
+                    return existing, act
+                if act == UP:
+                    return existing or "", act
+                print(_paint("fail", "  need an answer"))
+                continue
+            got = _ok(prompt, allowed, text)
+            if got is None:
+                continue
+            return got, act
+        got = _ok(prompt, allowed, text)
+        if got is None:
+            if existing:
+                return existing, ENTER
+            print(_paint("fail", "  need an answer"))
+            continue
+        return got, ENTER
+
+
+def _print_review(data: dict, sel: int) -> None:
+    total = len(PROMPTS)
+    print()
+    print(_paint("accent", "review", bold=True))
+    for i, (key, prompt, _) in enumerate(PROMPTS):
+        mark = "▸" if i == sel else " "
+        print(_paint("accent" if i == sel else "muted", f" {mark} {i + 1}  {prompt}"))
+        print(_paint("text", f"      {data.get(key, '')}"))
+    mark = "▸" if sel == EMIT else " "
+    print(_paint("accent" if sel == EMIT else "muted", f" {mark} emit"))
+    print(_paint("muted", "  ↑ ↓ · enter"))
+
+
+def _review(data: dict) -> dict:
+    total = len(PROMPTS)
+    if not _tty():
+        while True:
+            print()
+            print(_paint("accent", "review", bold=True))
+            for i, (key, prompt, _) in enumerate(PROMPTS, start=1):
+                print(_paint("muted", f"  {i}  {prompt}"))
+                print(_paint("text", f"     {data.get(key, '')}"))
+            print(_paint("muted", "  number to edit · done to emit"))
+            raw = input(_paint("accent", "▸ ")).strip()
+            if raw.lower() in {"", "done", "ok", "y", "yes"}:
+                return data
+            if raw.isdigit() and 1 <= int(raw) <= total:
+                n = int(raw)
+                key, prompt, allowed = PROMPTS[n - 1]
+                nxt, _act = ask(prompt, allowed, n, total, existing=str(data.get(key) or ""))
+                if nxt:
+                    data[key] = nxt
+                continue
+            print(_paint("fail", "  enter 1–9 or done"))
+    sel = 0
+    while True:
+        _print_review(data, sel)
+        keypress = _read_key()
+        if keypress == UP:
+            sel = (sel - 1) % (total + 1)
+            continue
+        if keypress == DOWN:
+            sel = (sel + 1) % (total + 1)
+            continue
+        if keypress != ENTER:
+            continue
+        if sel == EMIT:
+            return data
+        k, prompt, allowed = PROMPTS[sel]
+        nxt, act = ask(prompt, allowed, sel + 1, total, existing=str(data.get(k) or ""))
+        if nxt:
+            data[k] = nxt
+        if act == UP:
+            sel = max(sel - 1, 0)
+        elif act == DOWN:
+            sel = min(sel + 1, EMIT)
+
+
+def collect(prefill: dict | None, *, review: bool) -> dict:
+    data = dict(prefill or {})
+    total = len(PROMPTS)
+    i = 0
+    while i < total:
+        key, prompt, allowed = PROMPTS[i]
+        if not review and data.get(key) not in (None, ""):
+            i += 1
+            continue
+        nxt, act = ask(prompt, allowed, i + 1, total, existing=data.get(key) or None)
+        if act == UP:
+            if nxt:
+                data[key] = nxt
+            if i == 0:
+                print(_paint("fail", "  already first"))
+                continue
+            i -= 1
+            continue
+        if act == DOWN:
+            if not nxt and not data.get(key):
+                print(_paint("fail", "  need an answer"))
+                continue
+            if nxt:
+                data[key] = nxt
+            if i == total - 1:
+                break
+            i += 1
+            continue
+        data[key] = nxt
+        i += 1
+    if review:
+        data = _review(data)
+    return data
+
+
+def run_emit(repo: Path, spec: dict, playbook_body: str) -> int:
+    scripts = kit_root() / "scripts"
+    with tempfile.TemporaryDirectory() as td:
+        spec_path = Path(td) / "loop.yaml"
+        body_path = Path(td) / "playbook.md"
+        spec_path.write_text(dump_yaml(spec), encoding="utf-8")
+        body_path.write_text(playbook_body, encoding="utf-8")
+        lint = subprocess.run(
+            [
+                sys.executable,
+                str(scripts / "lint-loop"),
+                str(spec_path),
+                "--playbook",
+                str(body_path),
+                "--promote",
+                str(kit_root() / "templates" / "promote.md"),
+            ],
+            text=True,
+            capture_output=True,
+        )
+        if lint.returncode != 0:
+            sys.stderr.write(lint.stdout + lint.stderr)
+            return lint.returncode
+        emit = subprocess.run(
+            [
+                sys.executable,
+                str(scripts / "emit"),
+                "--repo",
+                str(repo),
+                "--spec",
+                str(spec_path),
+                "--playbook-body",
+                str(body_path),
+            ],
+            text=True,
+            capture_output=True,
+        )
+        sys.stdout.write(emit.stdout)
+        sys.stderr.write(emit.stderr)
+        return emit.returncode
+
+
+def install_ready() -> bool:
+    home = Path.home()
+    return all(
+        p.exists()
+        for p in (
+            home / ".local" / "bin" / "silk",
+            home / ".claude" / "skills" / "self-improvement-loop-kit" / "SKILL.md",
+            home / ".agents" / "skills" / "self-improvement-loop-kit" / "SKILL.md",
+            home / ".cursor" / "skills" / "self-improvement-loop-kit" / "SKILL.md",
+            home / ".cursor" / "commands" / "self-improvement-loop-kit.md",
+        )
+    )
+
+
+def run_first_install() -> int:
+    print(_paint("accent", "SILK", bold=True) + _paint("muted", " | first use — install"))
+    print(_paint("text", "Clients and the interview stay closed until this finishes."))
+    proc = subprocess.run([str(kit_root() / "scripts" / "install")])
+    if proc.returncode != 0:
+        return proc.returncode
+    print()
+    print(_paint("pass", "installed."))
+    print(_paint("text", "Then, in a project:  silk build"))
+    print(_paint("text", "Or in Cursor / Claude Code / Codex:  /self-improvement-loop-kit"))
+    return 0
+
+
+def usage() -> int:
+    welcome()
+    print(_paint("text", "  silk install    first use — PATH + Cursor, Claude Code, Codex"))
+    print(_paint("text", "  silk build      interview in this repo, then emit"))
+    print(_paint("text", "  silk play       record-run, then learn if pass, then verdict"))
+    print(_paint("text", "  silk learn      one Learned bullet from the last pass line"))
+    print(_paint("text", "  silk verdict    KEEP or drop the last Learned bullet"))
+    print(_paint("text", "  silk ui         open the board (loopback)"))
+    return 0
+
+
+def _open_port(start: int = 9348, n: int = 20) -> int:
+    for port in range(start, start + n):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.bind(("127.0.0.1", port))
+            return port
+        except OSError:
+            continue
+        finally:
+            sock.close()
+    raise OSError("no free loopback port")
+
+
+def start_visualizer(repo: Path) -> None:
+    if os.environ.get("SILK_NO_VIZ"):
+        return
+    port = _open_port()
+    log = repo / "loop-kit" / "visualize-server.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("ab") as fh:
+        subprocess.Popen(
+            [
+                sys.executable,
+                str(kit_root() / "scripts" / "visualize-server"),
+                "--repo",
+                str(repo),
+                "--port",
+                str(port),
+            ],
+            stdout=fh,
+            stderr=fh,
+            start_new_session=True,
+        )
+    url = f"http://127.0.0.1:{port}"
+    deadline = time.time() + 3
+    while time.time() < deadline:
+        try:
+            c = HTTPConnection("127.0.0.1", port, timeout=0.2)
+            c.request("GET", "/")
+            if c.getresponse().status == 200:
+                break
+        except OSError:
+            time.sleep(0.05)
+    else:
+        print(_paint("fail", "UI did not start"))
+        print(_paint("text", str(log)))
+        return
+    if port != 9348:
+        print(_paint("text", "9348 was busy"))
+    print(_paint("text", "UI  " + url))
+
+
+def cmd_build(repo: Path, json_path: str) -> int:
+    if not json_path and not install_ready():
+        print(_paint("fail", "not installed"))
+        print(_paint("text", "silk install"))
+        return 1
+    welcome()
+    prefill = {}
+    if json_path:
+        prefill = json.loads(Path(json_path).read_text(encoding="utf-8"))
+    data = collect(prefill if json_path else None, review=not bool(json_path))
+    spec = spec_from_intake(data)
+    playbook = playbook_from_intake(data)
+    codes = lint_spec(spec, playbook_text=playbook, promote_exists=True)
+    if codes:
+        print("lint failed: " + ", ".join(codes), file=sys.stderr)
+        return 1
+    rc = run_emit(repo, spec, playbook)
+    if rc != 0:
+        return rc
+    start_visualizer(repo)
+    closing()
+    return 0
+
+
+def closing() -> None:
+    print(
+        "\n"
+        "1. Follow playbook.md. Do not edit the probe, loop.yaml, or prior JSONL.\n"
+        "   When the probe is green or you hit the budget: silk play --repo .\n"
+        "   (silk play = record-run, then learn if pass, then verdict.)\n"
+        "2. Success = probe exit code, not your opinion. Not memory.\n"
+        "3. Evidence = loop-kit/scoreboard.jsonl. Board: silk ui (127.0.0.1:9348).\n"
+        "4. To start the next play without pasting: copy templates/play.github-action.yml\n"
+        "   into the harnessed repo as .github/workflows/silk-play.yml.\n"
+    )
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(
+        prog="silk",
+        description="Self Improvement Loop Kit.",
+    )
+    sub = p.add_subparsers(dest="cmd")
+    sub.add_parser("install", help="first use — PATH + three clients")
+    build = sub.add_parser("build", aliases=["builder"], help="interview + emit")
+    build.add_argument("--repo", default=".", help="project to emit into (default: current directory)")
+    build.add_argument("--json", default="", help=argparse.SUPPRESS)
+    ui = sub.add_parser("ui", help="open the board")
+    ui.add_argument("--repo", default=".", help=argparse.SUPPRESS)
+    learn = sub.add_parser("learn", help="one Learned bullet from the last pass line")
+    learn.add_argument("--repo", default=".")
+    learn.add_argument("--spec", default="loop-kit/loop.yaml")
+    verdict = sub.add_parser("verdict", help="KEEP or drop the last Learned bullet")
+    verdict.add_argument("--repo", default=".")
+    verdict.add_argument("--spec", default="loop-kit/loop.yaml")
+    play = sub.add_parser("play", help="record-run, then learn if pass, then verdict")
+    play.add_argument("--repo", default=".")
+    play.add_argument("--spec", default="loop-kit/loop.yaml")
+    play.add_argument("--actions", default="")
+    play.add_argument("--loop-id", default="")
+    args = p.parse_args()
+    if args.cmd == "install":
+        return run_first_install()
+    if args.cmd in {"build", "builder"}:
+        return cmd_build(Path(args.repo).resolve(), args.json)
+    if args.cmd == "ui":
+        repo = Path(args.repo).resolve()
+        start_visualizer(repo)
+        return 0
+    if args.cmd == "learn":
+        return subprocess.run(
+            [
+                sys.executable,
+                str(kit_root() / "scripts" / "learn"),
+                "--repo",
+                str(Path(args.repo).resolve()),
+                "--spec",
+                args.spec,
+            ]
+        ).returncode
+    if args.cmd == "verdict":
+        return subprocess.run(
+            [
+                sys.executable,
+                str(kit_root() / "scripts" / "verdict"),
+                "--repo",
+                str(Path(args.repo).resolve()),
+                "--spec",
+                args.spec,
+            ]
+        ).returncode
+    if args.cmd == "play":
+        cmd = [
+            sys.executable,
+            str(kit_root() / "scripts" / "play"),
+            "--repo",
+            str(Path(args.repo).resolve()),
+            "--spec",
+            args.spec,
+        ]
+        if args.actions:
+            cmd.extend(["--actions", args.actions])
+        if getattr(args, "loop_id", ""):
+            cmd.extend(["--loop-id", args.loop_id])
+        return subprocess.run(cmd).returncode
+    return usage()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

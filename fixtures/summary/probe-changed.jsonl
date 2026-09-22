@@ -1,0 +1,2 @@
+{"ts":"2026-09-16T10:00:00Z","loop_id":"checkout-5xx","probe":"true","pass":true,"seconds_to_green":20,"actions":["rollback"],"learned_hash":"aaaa0000","learned_count":0}
+{"ts":"2026-09-16T11:00:00Z","loop_id":"checkout-5xx","probe":"curl -f localhost/health","pass":true,"seconds_to_green":10,"actions":["rollback"],"learned_hash":"bbbb1111","learned_count":1}

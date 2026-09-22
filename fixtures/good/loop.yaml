@@ -1,0 +1,22 @@
+trigger: 5xx on checkout after deploy
+actor: claude-code
+playbook_path: playbook.md
+allow:
+  - rollback
+deny:
+  - playbook.md
+  - loop-kit/probe.sh
+  - loop-kit/scoreboard.jsonl
+  - loop-kit/loop.yaml
+probe:
+  command: "true"
+on_fail: revert
+budget:
+  max_iterations: 3
+  blast: one service
+promotion:
+  method: human-pr
+  target_path: playbook.md
+learned_section: Learned (probe-gated)
+scoreboard:
+  path: loop-kit/scoreboard.jsonl

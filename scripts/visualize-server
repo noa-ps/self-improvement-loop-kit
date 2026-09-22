@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+"""Read-only loopback server for the kit visualizer + consumer scoreboard."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlparse
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from kitlib import kit_root, load_jsonl, summarize  # noqa: E402
+
+HOST = "127.0.0.1"
+PORT = 9348
+
+
+def handler_for(repo: Path, viz: Path, scoreboard: Path):
+    repo = repo.resolve()
+    viz = viz.resolve()
+    scoreboard = scoreboard.resolve()
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, fmt, *args):
+            sys.stderr.write("visualize-server: " + (fmt % args) + "\n")
+
+        def _safe(self, target: Path) -> bool:
+            try:
+                target.resolve().relative_to(repo if str(scoreboard).startswith(str(repo)) else viz)
+            except ValueError:
+                return False
+            return True
+
+        def do_POST(self):
+            self.send_error(405, "Visualizer is read-only")
+
+        def do_PUT(self):
+            self.send_error(405, "Visualizer is read-only")
+
+        def do_GET(self):
+            path = urlparse(self.path).path
+            if path in {"/", "/index.html"}:
+                return self._file(viz / "index.html", "text/html; charset=utf-8")
+            if path == "/tokens.css":
+                return self._file(viz / "tokens.css", "text/css; charset=utf-8")
+            if path == "/app.js":
+                return self._file(viz / "app.js", "text/javascript; charset=utf-8")
+            name = path.lstrip("/")
+            if path == "/favicon.svg":
+                return self._file(viz / "favicon.svg", "image/svg+xml")
+            if path == "/favicon.ico":
+                return self._file(viz / "favicon-32.png", "image/png")
+            if name.startswith("favicon") and name.endswith(".png") and "/" not in name:
+                return self._file(viz / name, "image/png")
+            if path == "/scoreboard.jsonl":
+                if not str(scoreboard.resolve()).startswith(str(repo.resolve())):
+                    self.send_error(403, "scoreboard outside repo")
+                    return
+                body = scoreboard.read_bytes() if scoreboard.exists() else b""
+                self.send_response(200)
+                self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            if path == "/summary.json":
+                result = summarize(load_jsonl(scoreboard) if scoreboard.exists() else [])
+                payload = json.dumps(result).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+            self.send_error(404)
+
+        def _file(self, target: Path, ctype: str) -> None:
+            try:
+                target.resolve().relative_to(viz)
+            except ValueError:
+                self.send_error(403)
+                return
+            if not target.exists():
+                self.send_error(404)
+                return
+            data = target.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.end_headers()
+            self.wfile.write(data)
+
+    return Handler
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--repo", default=".")
+    p.add_argument("--scoreboard", default="loop-kit/scoreboard.jsonl")
+    p.add_argument("--port", type=int, default=PORT)
+    p.add_argument("--once", action="store_true", help="bind, print, exit (tests)")
+    args = p.parse_args()
+    repo = Path(args.repo).resolve()
+    viz = kit_root() / "visualize"
+    scoreboard = (repo / args.scoreboard).resolve()
+    if args.port and False:
+        pass
+    httpd = ThreadingHTTPServer((HOST, args.port), handler_for(repo, viz, scoreboard))
+    print(f"http://{HOST}:{args.port}")
+    if httpd.server_address[0] != HOST:
+        raise SystemExit("refusing non-loopback bind")
+    if args.once:
+        httpd.server_close()
+        return 0
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        return 0
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

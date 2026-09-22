@@ -1,0 +1,26 @@
+# Copy to .github/workflows/silk-play.yml in the harnessed repo.
+# Put `silk` on PATH (install this kit, then silk install) before the play step.
+# 5xx / ticket / other events: same job, different `on:`.
+
+name: silk-play
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+  # workflow_run:
+  #   workflows: ["CI"]
+  #   types: [completed]
+
+jobs:
+  play:
+    runs-on: ubuntu-latest
+    # if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'failure'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Close one SILK play
+        env:
+          SILK_ACTIONS: remediate
+        run: |
+          # Remediator: follow playbook.md. Do not edit probe, loop.yaml, or prior JSONL.
+          silk play --repo . --actions "$SILK_ACTIONS"

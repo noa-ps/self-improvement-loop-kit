@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+"""Close one play: record-run, learn if pass, then verdict. Does not edit the exam."""
+
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from kitlib import last_scoreboard_row, load_spec  # noqa: E402
+
+
+def _run(script: str, repo: Path, spec: str, extra: list[str] | None = None) -> int:
+    cmd = [sys.executable, str(Path(__file__).resolve().parent / script), "--repo", str(repo), "--spec", spec]
+    if extra:
+        cmd.extend(extra)
+    return subprocess.run(cmd).returncode
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--spec", default="loop-kit/loop.yaml")
+    p.add_argument("--repo", default=".")
+    p.add_argument("--actions", default="")
+    p.add_argument("--loop-id", default="")
+    args = p.parse_args()
+    repo = Path(args.repo).resolve()
+    print(
+        "Follow playbook.md. Do not edit the probe, loop.yaml, or prior JSONL. "
+        "Then this command records the exam and writes back.",
+        file=sys.stderr,
+    )
+    extra = []
+    if args.actions:
+        extra.extend(["--actions", args.actions])
+    if args.loop_id:
+        extra.extend(["--loop-id", args.loop_id])
+    rc = _run("record-run", repo, args.spec, extra)
+    spec = load_spec((repo / args.spec).resolve() if not Path(args.spec).is_absolute() else Path(args.spec))
+    row = last_scoreboard_row(repo / spec["scoreboard"]["path"])
+    if row and row.get("pass") is True:
+        learn_rc = _run("learn", repo, args.spec)
+        if learn_rc != 0:
+            return learn_rc
+    ver_rc = _run("verdict", repo, args.spec)
+    if ver_rc != 0:
+        return ver_rc
+    return rc
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

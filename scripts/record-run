@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""Run the probe and append one scoreboard JSONL line. Never rewrite prior lines."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from kitlib import learned_hash, load_spec  # noqa: E402
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--spec", default="loop-kit/loop.yaml")
+    p.add_argument("--repo", default=".")
+    p.add_argument("--actions", default="", help="comma-separated actions taken")
+    p.add_argument("--loop-id", default="")
+    args = p.parse_args()
+    repo = Path(args.repo).resolve()
+    spec = load_spec((repo / args.spec).resolve() if not Path(args.spec).is_absolute() else Path(args.spec))
+    playbook = (repo / spec["playbook_path"]).read_text(encoding="utf-8")
+    digest, count = learned_hash(playbook)
+    cmd = spec["probe"]["command"]
+    sb_path = repo / spec["scoreboard"]["path"]
+    sb_path.parent.mkdir(parents=True, exist_ok=True)
+    if not sb_path.exists():
+        sb_path.write_text("", encoding="utf-8")
+    before = sb_path.read_text(encoding="utf-8")
+    started = time.perf_counter()
+    proc = subprocess.run(cmd, shell=True, cwd=repo)
+    elapsed = time.perf_counter() - started
+    passed = proc.returncode == 0
+    row = {
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "loop_id": args.loop_id or Path(spec["playbook_path"]).stem,
+        "probe": cmd,
+        "pass": passed,
+        "seconds_to_green": round(elapsed, 3) if passed else round(elapsed, 3),
+        "actions": [a for a in args.actions.split(",") if a] or list(spec.get("allow") or []),
+        "learned_hash": digest,
+        "learned_count": count,
+    }
+    with sb_path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row, separators=(",", ":")) + "\n")
+    after_prefix = sb_path.read_text(encoding="utf-8")[: len(before)]
+    if after_prefix != before:
+        raise SystemExit("record-run rewrote prior scoreboard lines")
+    return proc.returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

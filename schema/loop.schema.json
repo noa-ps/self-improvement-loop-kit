@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local/self-improvement-loop-kit/loop.schema.json",
+  "title": "Self Improvement Loop Kit contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "trigger",
+    "actor",
+    "playbook_path",
+    "allow",
+    "deny",
+    "probe",
+    "on_fail",
+    "budget",
+    "promotion",
+    "learned_section",
+    "scoreboard"
+  ],
+  "properties": {
+    "trigger": { "type": "string", "minLength": 1 },
+    "actor": { "type": "string", "minLength": 1 },
+    "playbook_path": { "type": "string", "minLength": 1 },
+    "allow": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "deny": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command"],
+      "properties": {
+        "command": { "type": "string", "minLength": 1 }
+      }
+    },
+    "on_fail": {
+      "type": "string",
+      "enum": ["revert", "stop", "page"]
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_iterations", "blast"],
+      "properties": {
+        "max_iterations": { "type": "integer", "minimum": 1 },
+        "blast": { "type": "string", "minLength": 1 }
+      }
+    },
+    "promotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "target_path"],
+      "properties": {
+        "method": { "type": "string", "enum": ["pass-gated", "human-pr"] },
+        "target_path": { "type": "string", "minLength": 1 }
+      }
+    },
+    "learned_section": { "type": "string", "const": "Learned (probe-gated)" },
+    "scoreboard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "default": "loop-kit/scoreboard.jsonl" }
+      }
+    }
+  }
+}

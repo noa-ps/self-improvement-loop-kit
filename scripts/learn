@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Append one Learned bullet from the last pass: true scoreboard line."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from kitlib import (  # noqa: E402
+    append_learned,
+    last_scoreboard_row,
+    learn_bullet,
+    load_spec,
+)
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--spec", default="loop-kit/loop.yaml")
+    p.add_argument("--repo", default=".")
+    args = p.parse_args()
+    repo = Path(args.repo).resolve()
+    spec = load_spec((repo / args.spec).resolve() if not Path(args.spec).is_absolute() else Path(args.spec))
+    sb = repo / spec["scoreboard"]["path"]
+    yaml_path = repo / args.spec if not Path(args.spec).is_absolute() else Path(args.spec)
+    yaml_before = yaml_path.read_bytes()
+    sb_before = sb.read_bytes() if sb.exists() else b""
+    row = last_scoreboard_row(sb)
+    if not row or row.get("pass") is not True:
+        print("silk learn: last scoreboard line must be pass: true", file=sys.stderr)
+        return 2
+    playbook = repo / spec["playbook_path"]
+    before = playbook.read_text(encoding="utf-8") if playbook.exists() else ""
+    after = append_learned(before, learn_bullet(row))
+    playbook.write_text(after, encoding="utf-8")
+    if yaml_path.read_bytes() != yaml_before:
+        raise SystemExit("silk learn rewrote loop.yaml")
+    if (sb.read_bytes() if sb.exists() else b"") != sb_before:
+        raise SystemExit("silk learn rewrote the scoreboard")
+    print(learn_bullet(row))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
